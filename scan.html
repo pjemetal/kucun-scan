@@ -73,6 +73,7 @@ let API=API_URL||qpApi||ls.get("api","");
 let items=[],staff={},cats=[],who=ls.get("who",""),pmode="out",cart=[],hl=-1,kp=null,co=null,coT=0,orders=[],pq="",pcat="",syncT=0,carts={};
 let tt;function toast(t,bad){const e=$("toast");e.textContent=t;e.className=bad?"bad":"";e.style.display="block";clearTimeout(tt);tt=setTimeout(()=>e.style.display="none",bad?5000:2500)}
 const today=()=>new Date().toLocaleDateString("sv-SE");
+const qcode=k=>{let h=2166136261;for(const x of new TextEncoder().encode(String(k))){h^=x;h=Math.imul(h,16777619)>>>0}return h.toString(36)};   // 品項短代碼（標籤 QR 用）
 const keyOf=(c,n,s)=>"N:"+c+"|"+n+"|"+s;
 const staffFor=c=>(staff[c]&&staff[c].length)?staff[c]:(staff[""]||[]);
 const allStaff=()=>[...new Set(Object.values(staff).flat())];
@@ -85,7 +86,7 @@ async function api(body){
  if(!j.ok)throw new Error(j.error||"發生錯誤");return j.data}
 async function load(){
  const r=await fetch(API+(API.indexOf("?")<0?"?":"&")+"api=data");const j=await r.json();
- if(!j.ok)throw new Error(j.error||"讀取失敗");apply(j.data)}
+ if(!j.ok)throw new Error(j.error||"讀取失敗");apply(j.data);ls.set("data_cache",{items:j.data.items,staff:j.data.staff})}
 function apply(d){items=d.items||[];staff=d.staff||{};carts=d.carts||carts;
  cats=[...new Set(["業助補貨","技服自管","保管工具表(北區)_載運",...items.map(x=>x.cat)])]}
 
@@ -103,16 +104,19 @@ function addItem(it){
  else{cart.push({key:it.key,cat:it.cat,name:it.name,spec:it.spec,unit:it.unit,qty:1,mode:pmode});hl=cart.length-1}
  saveCart();return true}
 
-/* ---- 相機：即時掃描（連續） ---- */
-let stream=null,timer=0,cv=null,lastT="",lastSeen=0,jsqrP=null,actx=null;
+/* ---- 相機：即時掃描（連續） ----
+   加速：只讀畫面中間框框那一塊、縮小後再讀，一張讀完馬上讀下一張；手機支援的話改用內建的條碼辨識（更快） */
+let stream=null,timer=0,running=false,cv=null,lastT="",lastSeen=0,jsqrP=null,actx=null,det=null,nf=0;
 const camOn=()=>$("cam").style.display=="flex";
 function beep(){try{const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=1000;g.gain.value=.15;o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+.09)}catch(e){}}
 function loadJsQR(){if(window.jsQR)return Promise.resolve();
  return jsqrP=jsqrP||new Promise((ok,ng)=>{const s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
   s.onload=ok;s.onerror=()=>{jsqrP=null;ng(new Error("掃描程式載入失敗，請確認網路"))};document.head.appendChild(s)})}
+async function initDetector(){try{if(det===null&&"BarcodeDetector" in window){const f=await BarcodeDetector.getSupportedFormats();det=f.includes("qr_code")?new BarcodeDetector({formats:["qr_code"]}):false}else if(det===null)det=false}catch(e){det=false}}
 function itemFromText(t){let u;try{u=new URL(String(t).trim())}catch(e){return null}
  const g=k=>u.searchParams.get(k);
- if(g("m")=="pick"&&g("q"))return items.find(i=>i.cat==g("cat")&&String(i.name)+String(i.spec)==g("q"))||false;
+ if(g("i"))return items.find(i=>qcode(i.key)==g("i"))||false;   // 新版短標籤
+ if(g("m")=="pick"&&g("q"))return items.find(i=>i.cat==g("cat")&&String(i.name)+String(i.spec)==g("q"))||false;   // 舊版標籤也能用
  if(g("cat"))return "cat";return null}
 async function openCam(){   // 要在按鈕的點擊裡呼叫
  if(!who){alert("請先選擇領用人");return}
@@ -120,20 +124,30 @@ async function openCam(){   // 要在按鈕的點擊裡呼叫
  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();actx.resume()}catch(e){}   // 掃到時「嗶」一聲
  $("cam").style.display="flex";$("camhint").textContent="開啟相機中…";
  try{
-  if(!stream){[stream]=await Promise.all([navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false}),loadJsQR()]);
+  if(!stream){[stream]=await Promise.all([navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}},audio:false}),loadJsQR(),initDetector()]);
    const v=$("camv");v.srcObject=stream;v.muted=true;await v.play()}
   $("camhint").textContent="把品項的 QR 對準框框";
-  clearInterval(timer);timer=setInterval(tick,200)}
+  running=true;clearTimeout(timer);loop()}
  catch(e){closeCam(true);alert(/掃描程式/.test(msg(e))?msg(e):"打不開相機："+msg(e)+"\n請到 iPhone「設定 → Safari → 相機」改成允許")}}
-function tick(){const v=$("camv");if(!v.videoWidth||!window.jsQR)return;
- cv=cv||document.createElement("canvas");const sc=Math.min(1,900/Math.max(v.videoWidth,v.videoHeight));
- cv.width=Math.round(v.videoWidth*sc);cv.height=Math.round(v.videoHeight*sc);
- const x=cv.getContext("2d",{willReadFrequently:true});x.drawImage(v,0,0,cv.width,cv.height);
- const d=x.getImageData(0,0,cv.width,cv.height);const r=jsQR(d.data,d.width,d.height,{inversionAttempts:"attemptBoth"});
- if(!r||!r.data)return;
+async function loop(){if(!running)return;
+ let t=null;try{t=await readFrame()}catch(e){}
+ if(t&&running)handleCode(t);
+ if(running)timer=setTimeout(loop,30)}
+async function readFrame(){const v=$("camv");if(!v.videoWidth)return null;
+ if(det){const r=await det.detect(v);return r&&r[0]&&r[0].rawValue}
+ if(!window.jsQR)return null;
+ const vw=v.videoWidth,vh=v.videoHeight;nf++;
+ // 平常只讀中間框框（快）；每 4 張讀一次整個畫面，標籤沒對準框框也讀得到
+ const full=nf%4==0,side=full?Math.max(vw,vh):Math.min(vw,vh)*.75,sx=full?0:(vw-side)/2,sy=full?0:(vh-side)/2,sw=full?vw:side,sh=full?vh:side;
+ const max=full?640:480,sc=Math.min(1,max/Math.max(sw,sh));
+ cv=cv||document.createElement("canvas");cv.width=Math.round(sw*sc);cv.height=Math.round(sh*sc);
+ const x=cv.getContext("2d",{willReadFrequently:true});x.drawImage(v,sx,sy,sw,sh,0,0,cv.width,cv.height);
+ const d=x.getImageData(0,0,cv.width,cv.height);const r=jsQR(d.data,d.width,d.height,{inversionAttempts:"dontInvert"});
+ return r&&r.data}
+function handleCode(text){
  // 同一張標籤要先離開畫面 1.5 秒以上，再出現才會再算一次（避免標籤一直在鏡頭前被重複累加）
- const now=Date.now();if(r.data==lastT&&now-lastSeen<1500){lastSeen=now;return}lastT=r.data;lastSeen=now;
- const it=itemFromText(r.data);
+ const now=Date.now();if(text==lastT&&now-lastSeen<1500){lastSeen=now;return}lastT=text;lastSeen=now;
+ const it=itemFromText(text);
  if(it===null){$("camhint").textContent="這不是庫存系統的 QR，請掃品項標籤";return}
  if(it==="cat"){$("camhint").textContent="這是「整個分頁」的標籤，請掃品項標籤";return}
  if(it===false){$("camhint").textContent="找不到這個品項（可能已刪除或改名）";return}
@@ -144,7 +158,7 @@ function tick(){const v=$("camv");if(!v.videoWidth||!window.jsQR)return;
  if(addItem(it)){kp={k:hl,fresh:true,prev:prev};beep();toast("✔ "+it.name+" "+it.spec)}
  $("camhint").textContent="把下一個品項的 QR 對準框框";
  render()}
-function closeCam(stop){clearInterval(timer);timer=0;$("cam").style.display="none";
+function closeCam(stop){running=false;clearTimeout(timer);timer=0;$("cam").style.display="none";
  if(stop&&stream){stream.getTracks().forEach(t=>t.stop());stream=null;$("camv").srcObject=null}}
 $("camx").onclick=()=>{finishKp();closeCam(true);render()};
 
@@ -165,7 +179,7 @@ async function doCheckout(){if(!co)return;clearTimeout(coT);coT=0;render();
   const o={no:r.no,day:today(),time:new Date().toTimeString().slice(0,5),lines:d.cart.map(c=>(c.mode=="in"?"入庫 ":"領出 ")+c.name+" "+c.spec+" ×"+c.qty+(c.unit||""))};
   const all=ls.get("orders_"+d.who,[]).filter(x=>x.day==o.day&&x.no!=o.no);all.unshift(o);ls.set("orders_"+d.who,all.slice(0,20));
   if(d.who==who)orders=all.slice(0,20);
-  if(r.data)apply(r.data);toast("✔ 已送出（單號 "+r.no+"，共 "+r.count+" 項）"+(r.alerts?"，已通知 LINE":""))}
+  if(r.data){apply(r.data);ls.set("data_cache",{items:r.data.items,staff:r.data.staff})}toast("✔ 已送出（單號 "+r.no+"，共 "+r.count+" 項）"+(r.alerts?"，已通知 LINE":""))}
  catch(e){if(e instanceof NetErr){coT=setTimeout(doCheckout,15000);render();return}
   co=null;ls.del("co");alert(msg(e))}
  render()}
@@ -253,12 +267,27 @@ function render(){
   co={who,cart:JSON.parse(JSON.stringify(cart)),opId:Date.now().toString(36)+Math.random().toString(36).slice(2,8)};
   ls.set("co",co);clearTimeout(syncT);doCheckout()})}}
 
+/* 打開時：先用上次存在手機的資料馬上顯示（不用等），背景再跟伺服器拿最新的 */
+const startI=new URLSearchParams(location.search).get("i");   // 用相機掃標籤打開的：帶著品項代碼
+if(startI){try{const u=new URL(location.href);u.searchParams.delete("i");history.replaceState(null,"",u)}catch(e){}}   // 重新整理不會重複加入
+let pendingI=startI;
+function addFromLink(){if(!pendingI||!items.length)return;const it=items.find(i=>qcode(i.key)==pendingI);pendingI=null;
+ if(!it){alert("找不到這張標籤的品項（可能已刪除或改名），請通知管理者重印標籤");return}
+ if(!who){alert("請先選擇領用人，再掃一次標籤");return}
+ const prev=(cart.find(c=>same(c,it)&&c.mode===pmode)||{}).qty;
+ if(addItem(it)){kp={k:hl,fresh:true,prev:prev};toast("✔ "+it.name+" "+it.spec)}}
 async function start(){
- if(!API){render();return}
- $("app").innerHTML='<p class="mu">載入中…</p>';
- try{await load()}catch(e){$("app").innerHTML=`<div class="alert">讀不到庫存資料：${esc(msg(e))}<br>請確認網址正確，而且 Apps Script 部署時「誰可以存取」選的是「任何人」。</div><button id="reapi">重新輸入網址</button>`;
-  $("reapi").onclick=()=>{API="";ls.del("api");render()};return}
+ if(!API){render();if(pendingI)setTimeout(()=>alert("這支手機第一次使用：請先從庫存網頁的「⚡ 即時掃描」按鈕打開一次，之後掃標籤就能直接用"),300);return}
  co=ls.get("co",null);if(co&&co.who)who=co.who;
- loadCart();render();loadJsQR().catch(()=>{});if(co)doCheckout()}
+ const cached=ls.get("data_cache",null);
+ if(cached&&cached.items){apply(cached);loadCart();addFromLink();render()}
+ else $("app").innerHTML='<p class="mu">載入中…</p>';
+ loadJsQR().catch(()=>{});initDetector();
+ try{await load()}catch(e){
+  if(cached&&cached.items){toast("暫時連不到伺服器，先用上次的資料",true)}
+  else{$("app").innerHTML=`<div class="alert">讀不到庫存資料：${esc(msg(e))}<br>請確認網址正確，而且 Apps Script 部署時「誰可以存取」選的是「任何人」。</div><button id="reapi">重新輸入網址</button>`;
+   $("reapi").onclick=()=>{API="";ls.del("api");render()};return}}
+ if(!cached||!cached.items)loadCart();
+ addFromLink();render();if(co)doCheckout()}
 start();
 </script></body></html>
