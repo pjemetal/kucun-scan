@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>掃描取貨</title>
+<style>
+:root{--bg:#f6f7f5;--card:#fff;--tx:#1f2a24;--mu:#6b7770;--bd:#dfe4e0;--ac:#06a35a;--bad:#d6336c;--bb:#fde8ef;--dirty:#fff6d6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 -apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif}
+.w{max-width:680px;margin:0 auto;padding:14px 16px 40px}
+h1{font-size:20px;margin:4px 0 10px}
+button{border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:7px 12px;border-radius:8px;font:inherit;cursor:pointer;white-space:nowrap}
+button.on,button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+input,select{font:inherit;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px 8px;min-width:0;background:#fff}
+.mu{color:var(--mu);font-size:13px}.req{color:var(--bad)}
+.alert{background:var(--bb);border:1px solid var(--bad);border-radius:10px;padding:10px 12px;margin-bottom:10px;color:var(--bad)}
+.warn{background:#fff3cd;border:1px solid #e0b100;border-radius:10px;padding:10px 12px;margin-bottom:10px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+.bar,.qbar{display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px}
+.seg{display:flex;gap:6px;margin-bottom:10px}.seg button{flex:1;padding:10px}
+.seg button[data-m=out]{color:var(--bad);border-color:var(--bad)}.seg button[data-m=in]{color:var(--ac);border-color:var(--ac)}
+.seg button[data-m=out].on{background:var(--bad);color:#fff}.seg button[data-m=in].on{background:var(--ac);color:#fff}
+.big{width:100%;padding:16px;font-size:19px;margin-bottom:10px}
+.cl{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
+.cl.hl{background:var(--dirty)}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:#e6f6ee;color:var(--ac)}.tag.out{background:var(--bb);color:var(--bad)}
+button.tag{border:0;padding:3px 10px}
+.st{width:42px;height:38px;padding:0;font-size:18px;line-height:1}
+.cbox{position:sticky;top:0;z-index:6;background:var(--bg);padding:6px 0 8px;margin-bottom:6px;border-bottom:2px solid var(--bd);max-height:48vh;overflow-y:auto}
+.pc{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.pc.fix{position:fixed;left:0;right:0;bottom:0;max-width:680px;margin:0 auto;border-radius:14px 14px 0 0;box-shadow:0 -4px 14px rgba(0,0,0,.18);z-index:20;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+.pc.out{border-top:4px solid var(--bad)}.pc.in{border-top:4px solid var(--ac)}
+.pc button.p.out{background:var(--bad);border-color:var(--bad)}
+.kpq{display:flex;align-items:baseline;gap:8px;justify-content:center}.kpq b{font-size:34px;min-width:60px;text-align:center}
+.kpg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.kpg button{padding:12px 0;font-size:22px}
+summary{cursor:pointer}
+#cam{position:fixed;inset:0;background:#000;z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center}
+#camv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.camframe{position:relative;width:62vw;max-width:300px;aspect-ratio:1;border:3px solid #fff;border-radius:16px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+#camhint{position:relative;color:#fff;font-size:17px;margin-top:18px;text-align:center;padding:0 20px}
+#camx{position:absolute;bottom:calc(28px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);padding:12px 28px;font-size:17px;border-radius:99px}
+#toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);background:var(--ac);color:#fff;padding:12px 20px;border-radius:10px;font-size:16px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:40;display:none;max-width:90vw;text-align:center}#toast.bad{background:var(--bad)}
+</style></head><body>
+<div id="toast"></div>
+<div id="cam"><video id="camv" playsinline muted autoplay></video><div class="camframe"></div><p id="camhint">把品項的 QR 對準框框</p><button id="camx">✕ 結束掃描</button></div>
+<div class="w"><h1>📷 掃描取貨</h1><div id="app"><p class="mu">載入中…</p></div></div>
+<script>
+/* ========= 設定：把下面引號裡換成你的 Apps Script 網頁網址（結尾是 /exec） ========= */
+const API_URL = "";
+/* ================================================================================= */
+const $=i=>document.getElementById(i);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const msg=e=>String((e&&e.message)||e).replace(/^Error:\s*/,"");
+const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+ set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
+const qpApi=new URLSearchParams(location.search).get("api");if(qpApi)ls.set("api",qpApi);   // 從庫存網頁點過來會自動帶網址，記起來
+let API=API_URL||qpApi||ls.get("api","");
+let items=[],staff={},cats=[],who=ls.get("who",""),pmode="out",cart=[],hl=-1,kp=null,co=null,coT=0,orders=[],pq="",pcat="",syncT=0,carts={};
+let tt;function toast(t,bad){const e=$("toast");e.textContent=t;e.className=bad?"bad":"";e.style.display="block";clearTimeout(tt);tt=setTimeout(()=>e.style.display="none",bad?5000:2500)}
+const today=()=>new Date().toLocaleDateString("sv-SE");
+const keyOf=(c,n,s)=>"N:"+c+"|"+n+"|"+s;
+const staffFor=c=>(staff[c]&&staff[c].length)?staff[c]:(staff[""]||[]);
+const allStaff=()=>[...new Set(Object.values(staff).flat())];
+
+/* ---- 和 Apps Script 溝通 ---- */
+class NetErr extends Error{}
+async function api(body){
+ let r;try{r=await fetch(API,{method:"POST",body:JSON.stringify(body)})}catch(e){throw new NetErr("網路連不上")}
+ let j;try{j=await r.json()}catch(e){throw new NetErr("伺服器沒有回應")}
+ if(!j.ok)throw new Error(j.error||"發生錯誤");return j.data}
+async function load(){
+ const r=await fetch(API+(API.indexOf("?")<0?"?":"&")+"api=data");const j=await r.json();
+ if(!j.ok)throw new Error(j.error||"讀取失敗");apply(j.data)}
+function apply(d){items=d.items||[];staff=d.staff||{};carts=d.carts||carts;
+ cats=[...new Set(["業助補貨","技服自管","保管工具表(北區)_載運",...items.map(x=>x.cat)])]}
+
+/* ---- 取貨單（存在這支手機，背景備份到伺服器） ---- */
+function loadCart(){const loc=who?ls.get("cart_"+who,null):null;cart=loc!=null?loc:((carts&&carts[who])||[]);
+ orders=(who?ls.get("orders_"+who,[]):[]).filter(o=>o.day==today())}
+function saveCart(){if(!who)return;ls.set("cart_"+who,cart);clearTimeout(syncT);syncT=setTimeout(()=>api({api:"cartSet",who,cart}).catch(()=>{}),1000)}
+const same=(c,it)=>keyOf(c.cat,c.name,c.spec)===keyOf(it.cat,it.name,it.spec);
+function addItem(it){
+ if(co){alert("上一張單還在送出中，請等送出成功");return false}
+ if(!who){alert("請先選擇領用人");return false}
+ if(!staffFor(it.cat).includes(who)){alert("「"+who+"」不在「"+it.cat+"」的人員名單");return false}
+ const hit=cart.find(c=>same(c,it)&&c.mode===pmode);
+ if(hit){hit.qty=Math.round((Number(hit.qty)+1)*100)/100;hl=cart.indexOf(hit)}
+ else{cart.push({key:it.key,cat:it.cat,name:it.name,spec:it.spec,unit:it.unit,qty:1,mode:pmode});hl=cart.length-1}
+ saveCart();return true}
+
+/* ---- 相機：即時掃描（連續） ---- */
+let stream=null,timer=0,cv=null,lastT="",lastAt=0,jsqrP=null;
+function loadJsQR(){if(window.jsQR)return Promise.resolve();
+ return jsqrP=jsqrP||new Promise((ok,ng)=>{const s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+  s.onload=ok;s.onerror=()=>{jsqrP=null;ng(new Error("掃描程式載入失敗，請確認網路"))};document.head.appendChild(s)})}
+function itemFromText(t){let u;try{u=new URL(String(t).trim())}catch(e){return null}
+ const g=k=>u.searchParams.get(k);
+ if(g("m")=="pick"&&g("q"))return items.find(i=>i.cat==g("cat")&&String(i.name)+String(i.spec)==g("q"))||false;
+ if(g("cat"))return "cat";return null}
+async function openCam(){   // 要在按鈕的點擊裡呼叫
+ if(!who){alert("請先選擇領用人");return}
+ if(co){alert("上一張單還在送出中，請等送出成功");return}
+ $("cam").style.display="flex";$("camhint").textContent="開啟相機中…";
+ try{
+  if(!stream){[stream]=await Promise.all([navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false}),loadJsQR()]);
+   const v=$("camv");v.srcObject=stream;v.muted=true;await v.play()}
+  $("camhint").textContent="把品項的 QR 對準框框";
+  clearInterval(timer);timer=setInterval(tick,200)}
+ catch(e){closeCam(true);alert(/掃描程式/.test(msg(e))?msg(e):"打不開相機："+msg(e)+"\n請到 iPhone「設定 → Safari → 相機」改成允許")}}
+function tick(){const v=$("camv");if(!v.videoWidth||!window.jsQR)return;
+ cv=cv||document.createElement("canvas");const sc=Math.min(1,900/Math.max(v.videoWidth,v.videoHeight));
+ cv.width=Math.round(v.videoWidth*sc);cv.height=Math.round(v.videoHeight*sc);
+ const x=cv.getContext("2d",{willReadFrequently:true});x.drawImage(v,0,0,cv.width,cv.height);
+ const d=x.getImageData(0,0,cv.width,cv.height);const r=jsQR(d.data,d.width,d.height,{inversionAttempts:"attemptBoth"});
+ if(!r||!r.data)return;
+ if(r.data==lastT&&Date.now()-lastAt<2500)return;lastT=r.data;lastAt=Date.now();
+ const it=itemFromText(r.data);
+ if(it===null){$("camhint").textContent="這不是庫存系統的 QR，請掃品項標籤";return}
+ if(it==="cat"){$("camhint").textContent="這是「整個分頁」的標籤，請掃品項標籤";return}
+ if(it===false){$("camhint").textContent="找不到這個品項（可能已刪除或改名）";return}
+ clearInterval(timer);timer=0;$("cam").style.display="none";   // 相機不關，按「掃下一個」馬上能用
+ if(addItem(it)){kp={k:hl,fresh:true};toast("✔ "+it.name+" "+it.spec)}
+ render()}
+function closeCam(stop){clearInterval(timer);timer=0;$("cam").style.display="none";
+ if(stop&&stream){stream.getTracks().forEach(t=>t.stop());stream=null;$("camv").srcObject=null}}
+$("camx").onclick=()=>{closeCam(true);render()};
+
+/* ---- 數字鍵盤 ---- */
+function kpKey(v){const c=kp&&cart[kp.k];if(!c)return;let s=kp.fresh?"":String(c.qty);
+ if(v=="del")s=s.slice(0,-1);else if(v=="."){if(s.indexOf(".")<0)s=(s||"0")+"."}else s=(s=="0"?"":s)+v;
+ kp.fresh=false;kp.s=s;const n=Number(s);if(n>0){c.qty=Math.round(n*100)/100;saveCart()}render()}
+function kpDone(next){const c=kp&&cart[kp.k];
+ if(c&&kp.s!==undefined&&!(Number(kp.s)>0)){cart.splice(kp.k,1);hl=-1;saveCart();toast("數量是 0，已移除「"+c.name+"」")}
+ kp=null;render();if(next)openCam();else closeCam(true)}
+
+/* ---- 送出（訊號不好自動重送，同一張單只扣一次）／撤回 ---- */
+async function doCheckout(){if(!co)return;clearTimeout(coT);coT=0;render();
+ try{const r=await api({api:"checkout",who:co.who,cart:co.cart,opId:co.opId});
+  const d=co;co=null;ls.del("co");
+  if(d.who==who){cart=[];hl=-1;ls.set("cart_"+who,[])}
+  const o={no:r.no,day:today(),time:new Date().toTimeString().slice(0,5),lines:d.cart.map(c=>(c.mode=="in"?"入庫 ":"領出 ")+c.name+" "+c.spec+" ×"+c.qty+(c.unit||""))};
+  const all=ls.get("orders_"+d.who,[]).filter(x=>x.day==o.day&&x.no!=o.no);all.unshift(o);ls.set("orders_"+d.who,all.slice(0,20));
+  if(d.who==who)orders=all.slice(0,20);
+  if(r.data)apply(r.data);toast("✔ 已送出（單號 "+r.no+"，共 "+r.count+" 項）"+(r.alerts?"，已通知 LINE":""))}
+ catch(e){if(e instanceof NetErr){coT=setTimeout(doCheckout,15000);render();return}
+  co=null;ls.del("co");alert(msg(e))}
+ render()}
+window.addEventListener("online",()=>{if(co)doCheckout()});
+async function undo(no){if(!confirm("撤回單號 "+no+"？這張單的領出／入庫會全部還原。"))return;
+ try{const r=await api({api:"undo",who,no});orders=orders.filter(o=>o.no!=no);ls.set("orders_"+who,orders);if(r.data)apply(r.data);toast("✔ 已撤回單號 "+no);render()}
+ catch(e){alert(e instanceof NetErr?"訊號不好，撤回沒有成功，請稍後再試":msg(e))}}
+
+/* ---- 畫面 ---- */
+function resHtml(){const s=pq.trim().toLowerCase();if(!s&&!pcat)return"";
+ return items.filter(i=>s?(i.cat+i.name+i.spec).toLowerCase().includes(s):i.cat==pcat).slice(0,s?8:200).map(i=>{
+  const n=cart.filter(c=>same(c,i)).reduce((a,c)=>a+Number(c.qty),0);
+  return`<div class="cl"><span>${esc(i.name)} ${esc(i.spec)} <span class="mu">${esc(i.cat)}｜現有 ${i.qty}${esc(i.unit)}</span>${n?` <span class="tag">已選 ${n}</span>`:""}</span><button class="p" data-s="${i.row}">＋</button></div>`}).join("")||`<p class="mu">找不到品項</p>`}
+function render(){
+ if(!API){$("app").innerHTML=`<div class="pc"><b>第一次使用：請貼上庫存系統的網址</b><span class="mu">Apps Script →「部署」→「管理部署作業」→ 網頁應用程式的網址（結尾是 /exec）</span><input id="apiu" placeholder="https://script.google.com/macros/s/…/exec"><button class="p" id="apiok">儲存</button></div>`;
+  $("apiok").onclick=()=>{const v=$("apiu").value.trim();if(!/^https:\/\/script\.google\.com\/.+\/exec/.test(v)){alert("網址格式不對，要是 https://script.google.com/…/exec");return}API=v;ls.set("api",v);start()};return}
+ const lock=!!co,list=lock?co.cart:cart;
+ $("app").innerHTML=`<div class="qbar"><label class="mu">領用人<span class="req">*</span> <select id="pwho" ${lock?"disabled":""}><option value="">請選擇</option>${allStaff().map(n=>`<option ${n==who?"selected":""}>${esc(n)}</option>`).join("")}</select></label></div>
+ <button class="p big" id="pscan" ${lock?"disabled":""}>📷 開始掃描</button>
+ <div class="seg"><button data-m="out" class="${pmode=="out"?"on":""}">領出（扣庫存）</button><button data-m="in" class="${pmode=="in"?"on":""}">入庫（加庫存）</button></div>
+ ${lock?`<div class="warn">📶 ${coT?"訊號不好，還沒送出成功，系統每 15 秒自動重送（不會重複扣）":"送出中…"}<button id="pretry" ${coT?"":"disabled"}>立即重送</button></div>`:""}
+ <div class="cbox"><h3 style="margin:4px 0">🛒 取貨單（${list.length}）</h3>
+ ${lock?list.map(c=>`<div class="cl"><span><span class="tag ${c.mode=="in"?"":"out"}">${c.mode=="in"?"入庫":"領出"}</span> ${esc(c.name)} ${esc(c.spec)}</span><span>${c.qty}${esc(c.unit)}</span></div>`).join(""):
+  list.length?list.map((c,k)=>`<div class="cl ${k==hl?"hl":""}"><span><button class="tag ${c.mode=="in"?"":"out"}" data-t="${k}">${c.mode=="in"?"入庫":"領出"}</button> ${esc(c.name)} ${esc(c.spec)}</span>
+  <span style="display:flex;align-items:center;gap:4px;white-space:nowrap"><button class="st" data-q="${k}" data-d="-1">−</button><input readonly data-qi="${k}" value="${c.qty}" style="width:56px;text-align:center"><button class="st" data-q="${k}" data-d="1">＋</button>${esc(c.unit)} <button class="danger" data-x="${k}">✕</button></span></div>`).join(""):`<p class="mu">按「📷 開始掃描」，掃到的品項會自動加入並跳出數字鍵盤。</p>`}
+ <div class="qbar" style="margin-top:10px"><button class="p" id="pgo" ${cart.length&&!lock?"":"disabled"}>確認送出</button><button id="pclr" ${cart.length&&!lock?"":"disabled"}>清空</button></div></div>
+ ${orders.length?`<details class="pc"><summary><b>今天送出的單（${orders.length}）</b> <span class="mu">送錯可以撤回</span></summary>`+orders.map(o=>`<div class="cl"><span><b>${esc(o.time)}</b> <span class="mu">單號 ${esc(o.no)}</span><br><span class="mu">${o.lines.map(esc).join("、")}</span></span><button class="danger" data-u="${esc(o.no)}">撤回</button></div>`).join("")+`</details>`:""}
+ <div class="mu" style="margin:14px 0 4px">沒有標籤的品項可以從這裡加入：</div>
+ <div class="tabs">${cats.map(c=>`<button class="${c==pcat?"on":""}" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>
+ <div class="bar"><input id="psq" placeholder="搜尋品名／規格／分頁" value="${esc(pq)}" style="flex:1"></div><div id="pres">${resHtml()}</div>
+ ${kp&&cart[kp.k]&&!lock?(()=>{const c=cart[kp.k],disp=kp.fresh?c.qty:(kp.s===""?"0":kp.s);
+  return`<div class="pc fix ${c.mode}"><div style="display:flex;justify-content:space-between;align-items:center"><b>${esc(c.name)} ${esc(c.spec)}</b><span class="tag ${c.mode=="in"?"":"out"}">${c.mode=="in"?"入庫":"領出"}</span></div>
+  <div class="kpq"><span class="mu">數量</span><b>${esc(disp)}</b><span>${esc(c.unit)}</span></div>
+  <div class="kpg">${["1","2","3","4","5","6","7","8","9",".","0","del"].map(v=>`<button data-kp="${v}">${v=="del"?"⌫":v}</button>`).join("")}</div>
+  <div style="display:flex;gap:8px"><button id="kpok" style="flex:1;padding:12px;font-size:17px">完成</button><button class="p ${c.mode}" id="kpnext" style="flex:2;padding:12px;font-size:17px">完成，掃下一個 📷</button></div></div>`})():""}`;
+ document.body.style.paddingBottom=kp?"380px":"0";
+ const on=(sel,fn)=>document.querySelectorAll(sel).forEach(fn);
+ $("pwho").onchange=e=>{who=e.target.value;ls.set("who",who);loadCart();hl=-1;kp=null;render()};
+ $("pscan").onclick=openCam;
+ on("[data-m]",b=>b.onclick=()=>{pmode=b.dataset.m;render()});
+ if($("pretry"))$("pretry").onclick=doCheckout;
+ on("[data-q]",b=>b.onclick=()=>{const k=+b.dataset.q,c=cart[k],q=Math.round((Number(c.qty)+Number(b.dataset.d))*100)/100;
+  if(q>0)c.qty=q;else cart.splice(k,1);hl=q>0?k:-1;saveCart();render()});
+ on("[data-qi]",el=>el.onclick=()=>{hl=+el.dataset.qi;kp={k:hl,fresh:true};render()});
+ on("[data-t]",b=>b.onclick=()=>{const c=cart[+b.dataset.t];c.mode=c.mode=="in"?"out":"in";hl=+b.dataset.t;saveCart();render()});
+ on("[data-x]",b=>b.onclick=()=>{cart.splice(+b.dataset.x,1);hl=-1;kp=null;saveCart();render()});
+ on("[data-u]",b=>b.onclick=()=>undo(b.dataset.u));
+ on("[data-c]",b=>b.onclick=()=>{pcat=pcat==b.dataset.c?"":b.dataset.c;pq="";render()});
+ on("[data-kp]",b=>b.onclick=()=>kpKey(b.dataset.kp));
+ if($("kpok"))$("kpok").onclick=()=>kpDone(false);
+ if($("kpnext"))$("kpnext").onclick=()=>kpDone(true);
+ const bindSel=()=>on("#pres [data-s]",b=>b.onclick=()=>{const it=items.find(x=>x.row==b.dataset.s);if(addItem(it)){kp={k:hl,fresh:true};toast("✔ 已加入："+it.name)}render()});
+ bindSel();
+ $("psq").oninput=e=>{pq=e.target.value;$("pres").innerHTML=resHtml();bindSel()};
+ $("pclr").onclick=()=>{if(!confirm("清空取貨單？"))return;cart=[];hl=-1;kp=null;saveCart();render()};
+ $("pgo").onclick=()=>{if(!who){alert("請先選擇領用人");return}
+  if(!confirm("確認送出 "+cart.length+" 項？領出會扣庫存，入庫會加回去。"))return;
+  kp=null;closeCam(true);co={who,cart:JSON.parse(JSON.stringify(cart)),opId:Date.now().toString(36)+Math.random().toString(36).slice(2,8)};
+  ls.set("co",co);clearTimeout(syncT);doCheckout()}}
+
+async function start(){
+ if(!API){render();return}
+ $("app").innerHTML='<p class="mu">載入中…</p>';
+ try{await load()}catch(e){$("app").innerHTML=`<div class="alert">讀不到庫存資料：${esc(msg(e))}<br>請確認網址正確，而且 Apps Script 部署時「誰可以存取」選的是「任何人」。</div><button id="reapi">重新輸入網址</button>`;
+  $("reapi").onclick=()=>{API="";ls.del("api");render()};return}
+ co=ls.get("co",null);if(co&&co.who)who=co.who;
+ loadCart();render();loadJsQR().catch(()=>{});if(co)doCheckout()}
+start();
+</script></body></html>
